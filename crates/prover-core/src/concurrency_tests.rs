@@ -75,7 +75,7 @@ impl ProofSpec for Spec {
 }
 struct Strategy;
 impl ProveStrategy<Spec> for Strategy {
-    fn prove(&self, _: &(), _ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
+    fn prove(&self, _: (), _ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
         Ok(ProofReceiptWithMetadata::default())
     }
 }
@@ -409,7 +409,7 @@ async fn failed_deadline_write_leaves_a_blocked_task_proving() {
 
 struct ResubmitStrategy;
 impl ProveStrategy<Spec> for ResubmitStrategy {
-    fn prove(&self, _: &(), _ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
+    fn prove(&self, _: (), _ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
         Err(ProverError::resubmit("expired remote request"))
     }
 }
@@ -461,7 +461,7 @@ async fn retry_writes_metadata_clear_and_deadline_before_status() {
 struct SaveIdStrategy;
 #[cfg(feature = "remote")]
 impl ProveStrategy<Spec> for SaveIdStrategy {
-    fn prove(&self, _: &(), mut ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
+    fn prove(&self, _: (), mut ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
         ctx.persist(vec![7]);
         Ok(ProofReceiptWithMetadata::default())
     }
@@ -848,5 +848,85 @@ mod remote {
             })
             .await;
         }
+    }
+
+    /// A task input that counts how many copies are alive.
+    struct Witness(Arc<AtomicUsize>);
+    impl Witness {
+        fn new(live: &Arc<AtomicUsize>) -> Self {
+            live.fetch_add(1, Ordering::SeqCst);
+            Self(live.clone())
+        }
+    }
+    impl Drop for Witness {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+    struct WitnessProgram;
+    impl ZkVmProgram for WitnessProgram {
+        type Input = Witness;
+        type Output = ();
+        fn name() -> String {
+            "witness-test".into()
+        }
+        fn proof_type() -> ProofType {
+            ProofType::Core
+        }
+        fn prepare_input<'a, B: ZkVmInputBuilder<'a>>(_: &'a Witness) -> ZkVmInputResult<B::Input> {
+            B::new().build()
+        }
+        fn process_output<H: ZkVmHost>(_: &PublicValues) -> ZkVmResult<()> {
+            Ok(())
+        }
+    }
+    struct WitnessSpec {
+        live: Arc<AtomicUsize>,
+    }
+    #[async_trait]
+    impl ProofSpec for WitnessSpec {
+        type Task = Task;
+        type Program = WitnessProgram;
+        async fn resolve_input(&self, _: &Task) -> ProverResult<InputResolution<Witness>> {
+            Ok(InputResolution::Ready(Witness::new(&self.live)))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn remote_proofs_drop_their_input_once_submitted() {
+        let shared = budget(1);
+        let live = Arc::new(AtomicUsize::new(0));
+        let host = Host {
+            native: NativeHost::new_with_random_key(|_| {}),
+            budget: shared.clone(),
+            submissions: Arc::new(AtomicUsize::new(0)),
+            polls: Arc::new(AtomicUsize::new(0)),
+            finish: Arc::new(Semaphore::new(0)),
+        };
+        let p = Arc::new(
+            ProverBuilder::new(WitnessSpec { live: live.clone() })
+                .task_store(Arc::new(InMemoryTaskStore::new()))
+                .concurrency_budget(shared)
+                .remote_with_interval(host.clone(), Duration::from_millis(1)),
+        );
+        for t in 1..=3 {
+            p.submit(Task(t)).await.unwrap();
+        }
+        // One task submits at a time; each releases capacity once submitted,
+        // and a tick starts the next.
+        timeout(Duration::from_secs(5), async {
+            while host.polls.load(Ordering::SeqCst) < 3 {
+                p.tick().await;
+                yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // All three proofs are polling, and none keeps its input alive.
+        let live_while_polling = live.load(Ordering::SeqCst);
+        host.finish.add_permits(3);
+        assert_eq!(host.submissions.load(Ordering::SeqCst), 3);
+        assert_eq!(live_while_polling, 0);
+        until(|| (1..=3).all(|t| p.get_status(&Task(t)).unwrap() == TaskStatus::Completed)).await;
     }
 }
