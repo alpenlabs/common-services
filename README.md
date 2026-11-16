@@ -1,9 +1,9 @@
-# Strata Common Services
+# Common Services
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache-blue.svg)](https://opensource.org/licenses/apache-2-0)
-[![lint](https://github.com/alpenlabs/strata-common-services/actions/workflows/lint.yml/badge.svg?event=push)](https://github.com/alpenlabs/strata-common-services/actions/workflows/lint.yml)
-[![unit](https://github.com/alpenlabs/strata-common-services/actions/workflows/unit.yml/badge.svg?event=push)](https://github.com/alpenlabs/strata-common-services/actions/workflows/unit.yml)
+[![lint](https://github.com/alpenlabs/common-services/actions/workflows/lint.yml/badge.svg?event=push)](https://github.com/alpenlabs/common-services/actions/workflows/lint.yml)
+[![unit](https://github.com/alpenlabs/common-services/actions/workflows/unit.yml/badge.svg?event=push)](https://github.com/alpenlabs/common-services/actions/workflows/unit.yml)
 
 Services shared by [Alpen](https://github.com/alpenlabs/alpen) and Alpen EE.
 The crates here were moved out of the Alpen workspace so that both nodes can
