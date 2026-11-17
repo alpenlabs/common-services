@@ -335,9 +335,11 @@ impl<H: ProofSpec> Prover<H> {
             return Ok(());
         };
         let status = record.status();
-        let runnable = matches!(status, TaskStatus::Pending)
-            || (status.wants_rescan()
-                && record.retry_after_secs().is_some_and(|at| at <= now_secs()));
+        // The same rule as `TaskStore::list_retriable`: a rescan status with
+        // no deadline is the record of a scheduling write that did not land,
+        // and it is due now, since nothing else selects it.
+        let runnable =
+            matches!(status, TaskStatus::Pending) || record.data().is_due_for_rescan(now_secs());
         if !runnable {
             return Ok(());
         }

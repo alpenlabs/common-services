@@ -244,6 +244,33 @@ async fn tick_starts_pending_rows_left_by_an_earlier_process() {
 }
 
 #[tokio::test]
+async fn tick_starts_a_rescan_row_whose_deadline_write_did_not_land() {
+    // A `TransientFailure` with no `retry_after` is what a half-landed
+    // `schedule_rescan` leaves behind. `list_retriable` returns it as due, and
+    // dispatch must agree, or the row is offered on every tick and never
+    // started.
+    let store = Arc::new(InMemoryTaskStore::new());
+    store
+        .insert(TaskRecord::new(
+            vec![1],
+            TaskStatus::TransientFailure {
+                counts: AttemptCounts::default(),
+                error: "boom".into(),
+            },
+        ))
+        .unwrap();
+    assert_eq!(store.get(&[1]).unwrap().unwrap().retry_after_secs(), None);
+    let (p, entered, gate) = build(store.clone(), false);
+    p.tick().await;
+    until(|| entered.load(Ordering::SeqCst) == 1).await;
+    assert!(matches!(
+        p.get_status(&Task(1)).unwrap(),
+        TaskStatus::Proving { .. }
+    ));
+    gate.add_permits(1);
+}
+
+#[tokio::test]
 async fn failed_recovery_blocks_submission_and_is_retried() {
     let store = Arc::new(FaultStore::default());
     store
