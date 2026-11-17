@@ -190,10 +190,10 @@ pub trait ProofSpec: Send + Sync + 'static {
 /// independent provers are not, because startup recovery treats `Proving` rows
 /// as interrupted work. Use disjoint stores or scoped key prefixes per owner.
 ///
-/// Lifecycle writes are ordered but not transactional. The status goes last, so
-/// a crash or a failed write between the metadata, deadline and status writes
-/// leaves the row `Proving`, which restart recovery treats as an interrupted
-/// attempt.
+/// A rescan is one [`Self::schedule_rescan`] write, after any metadata clear
+/// it needs, so a failed write never leaves a rescan status without its
+/// deadline. A crash or a failed write before the status lands leaves the row
+/// `Proving`, which restart recovery treats as an interrupted attempt.
 pub trait TaskStore: Send + Sync + 'static {
     fn get(&self, key: &[u8]) -> ProverResult<Option<TaskRecord>>;
     fn insert(&self, record: TaskRecord) -> ProverResult<()>;

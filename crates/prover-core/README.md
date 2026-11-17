@@ -15,9 +15,10 @@ input and submit proofs at once:
   finds none stays a durable `Pending` row, and a later `tick()` starts it;
   nothing waits in memory.
 - Native proving holds its unit until the blocking proof returns.
-- Remote proving releases its unit once the new proof ID is saved, or a saved ID
-  is accepted, before polling. The budget does not limit how many remote proofs
-  run at once.
+- Remote proving releases its unit once it has tried to save the new proof ID
+  (a failed save is logged and leaves the task to resubmit after a restart), or
+  once a saved ID is accepted, before polling. The budget does not limit how
+  many remote proofs run at once.
 - Receipt storage and receipt hooks run without capacity.
 - `Blocked` rechecks use capacity only while they resolve input.
 
@@ -26,8 +27,14 @@ without a tick interval. Each prover must own its task-key namespace; a shared
 budget does not make overlapping task stores safe.
 
 Dispatch tries `Pending` rows before due retries, each in the task store's key
-order, and skips its scans while no capacity is free. A failed task-store write
-is logged and leaves the row `Proving`, so restart recovery retries the task.
+order, and skips its scans while no capacity is free. Tasks start only on
+ticks, so a capacity-limited prover starts at most its budget per tick
+interval, however fast units come back.
+
+A task-store write the store did not take is logged. A terminal outcome
+(`Completed`, `PermanentFailure`) still reaches waiters, since the work is
+done; a rescan is not scheduled at all. Either way the row stays `Proving`, so
+restart recovery treats the attempt as interrupted and proves the task again.
 
 ## What problem does this solve?
 

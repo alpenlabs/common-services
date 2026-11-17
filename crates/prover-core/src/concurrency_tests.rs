@@ -355,15 +355,29 @@ async fn failed_completion_write_leaves_the_row_for_restart_recovery() {
     let (p, entered, gate) = build(store.clone(), false);
     p.submit(Task(1)).await.unwrap();
     until(|| entered.load(Ordering::SeqCst) == 1).await;
+    let waiter = tokio::spawn({
+        let p = p.clone();
+        async move { p.wait_for_tasks(&[Task(1)]).await }
+    });
     store.fail_update.store(true, Ordering::SeqCst);
     gate.add_permits(1);
     until(|| store.write_failures.load(Ordering::SeqCst) > 0).await;
     store.fail_update.store(false, Ordering::SeqCst);
 
-    // Waiters hear only recorded outcomes, and dispatch never restarts a
-    // `Proving` row in the same process.
-    let waited = timeout(Duration::from_millis(200), p.wait_for_tasks(&[Task(1)])).await;
-    assert!(waited.is_err());
+    // The attempt is over, so a waiter already subscribed hears the outcome
+    // it decided, even though the store did not take it.
+    let results = timeout(Duration::from_secs(5), waiter)
+        .await
+        .expect("waiter hears the decided outcome")
+        .unwrap()
+        .unwrap();
+    assert!(results[0].is_completed());
+
+    // The row still says `Proving`: a later subscriber waits for the restart
+    // that recovers it, and dispatch never restarts a `Proving` row in the
+    // same process.
+    let late = timeout(Duration::from_millis(200), p.wait_for_tasks(&[Task(1)])).await;
+    assert!(late.is_err());
     p.tick().await;
     assert!(matches!(
         p.get_status(&Task(1)).unwrap(),
