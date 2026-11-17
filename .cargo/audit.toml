@@ -1,0 +1,12 @@
+[advisories]
+ignore = [
+  # RUSTSEC-2026-0387 (crypto-bigint 0.5.5)
+  # Reached only through zkaleido-native-adapter, a dev-dependency of
+  # prover-core whose tests need a real ZkVmHost: it pins k256 0.13, so
+  # elliptic-curve 0.13 and crypto-bigint 0.5. The patched crypto-bigint
+  # 0.7.6 needs the elliptic-curve 0.14 stack, which zkaleido has not
+  # adopted. Nothing in this workspace's library code depends on it, and the
+  # tests sign nothing with a secret. Remove this entry once zkaleido moves
+  # to elliptic-curve 0.14.
+  "RUSTSEC-2026-0387",
+]

@@ -5,6 +5,37 @@ end-to-end: assembling inputs, generating proofs (locally or via a remote
 backend), persisting receipts, and — the bulk of this crate — deciding *what to
 do when something goes wrong*.
 
+## Submission concurrency
+
+Clone one `ConcurrencyBudget` into the `ProverBuilder::concurrency_budget` of
+every prover that should share it. The budget bounds how many tasks prepare
+input and submit proofs at once:
+
+- A task takes a unit of capacity before it prepares its input. A task that
+  finds none stays a durable `Pending` row, and a later `tick()` starts it;
+  nothing waits in memory.
+- Native proving holds its unit until the blocking proof returns.
+- Remote proving releases its unit once it has tried to save the new proof ID
+  (a failed save is logged and leaves the task to resubmit after a restart), or
+  once a saved ID is accepted, before polling. The budget does not limit how
+  many remote proofs run at once.
+- Receipt storage and receipt hooks run without capacity.
+- `Blocked` rechecks use capacity only while they resolve input.
+
+Without a budget, every task starts on submission. PaaS rejects a budget
+without a tick interval. Each prover must own its task-key namespace; a shared
+budget does not make overlapping task stores safe.
+
+Dispatch tries `Pending` rows before due retries, each in the task store's key
+order, and skips its scans while no capacity is free. Tasks start only on
+ticks, so a capacity-limited prover starts at most its budget per tick
+interval, however fast units come back.
+
+A task-store write the store did not take is logged. A terminal outcome
+(`Completed`, `PermanentFailure`) still reaches waiters, since the work is
+done; a rescan is not scheduled at all. Either way the row stays `Proving`, so
+restart recovery treats the attempt as interrupted and proves the task again.
+
 ## What problem does this solve?
 
 Proof generation has a lot of moving parts: input assembly, host selection,
