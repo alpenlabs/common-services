@@ -892,10 +892,58 @@ mod remote {
         }
     }
 
+    /// A store that records whether the task's input was still alive when
+    /// its proof ID was saved.
+    struct SaveWitnessStore {
+        inner: InMemoryTaskStore,
+        live: Arc<AtomicUsize>,
+        saves: AtomicUsize,
+        saves_without_input: AtomicUsize,
+    }
+    impl TaskStore for SaveWitnessStore {
+        fn get(&self, k: &[u8]) -> ProverResult<Option<TaskRecord>> {
+            self.inner.get(k)
+        }
+        fn insert(&self, r: TaskRecord) -> ProverResult<()> {
+            self.inner.insert(r)
+        }
+        fn update_status(&self, k: &[u8], s: TaskStatus) -> ProverResult<()> {
+            self.inner.update_status(k, s)
+        }
+        fn set_retry_after(&self, k: &[u8], t: u64) -> ProverResult<()> {
+            self.inner.set_retry_after(k, t)
+        }
+        fn set_metadata(&self, k: &[u8], d: Vec<u8>) -> ProverResult<()> {
+            self.saves.fetch_add(1, Ordering::SeqCst);
+            if self.live.load(Ordering::SeqCst) == 0 {
+                self.saves_without_input.fetch_add(1, Ordering::SeqCst);
+            }
+            self.inner.set_metadata(k, d)
+        }
+        fn clear_metadata(&self, k: &[u8]) -> ProverResult<()> {
+            self.inner.clear_metadata(k)
+        }
+        fn list_retriable(&self, t: u64) -> ProverResult<Vec<TaskRecord>> {
+            self.inner.list_retriable(t)
+        }
+        fn list_unfinished(&self) -> ProverResult<Vec<TaskRecord>> {
+            self.inner.list_unfinished()
+        }
+        fn count(&self) -> ProverResult<usize> {
+            self.inner.count()
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn remote_proofs_drop_their_input_once_submitted() {
         let shared = budget(1);
         let live = Arc::new(AtomicUsize::new(0));
+        let store = Arc::new(SaveWitnessStore {
+            inner: InMemoryTaskStore::new(),
+            live: live.clone(),
+            saves: AtomicUsize::new(0),
+            saves_without_input: AtomicUsize::new(0),
+        });
         let host = Host {
             native: NativeHost::new_with_random_key(|_| {}),
             budget: shared.clone(),
@@ -905,7 +953,7 @@ mod remote {
         };
         let p = Arc::new(
             ProverBuilder::new(WitnessSpec { live: live.clone() })
-                .task_store(Arc::new(InMemoryTaskStore::new()))
+                .task_store(store.clone())
                 .concurrency_budget(shared)
                 .remote_with_interval(host.clone(), Duration::from_millis(1)),
         );
@@ -927,6 +975,9 @@ mod remote {
         host.finish.add_permits(3);
         assert_eq!(host.submissions.load(Ordering::SeqCst), 3);
         assert_eq!(live_while_polling, 0);
+        // Each input outlived the save of its proof ID.
+        assert_eq!(store.saves.load(Ordering::SeqCst), 3);
+        assert_eq!(store.saves_without_input.load(Ordering::SeqCst), 0);
         until(|| (1..=3).all(|t| p.get_status(&Task(t)).unwrap() == TaskStatus::Completed)).await;
     }
 }

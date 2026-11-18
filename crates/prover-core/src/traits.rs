@@ -388,8 +388,9 @@ pub(crate) trait ProveStrategy<H: ProofSpec>: Send + Sync + 'static {
     /// Proves `input`.
     ///
     /// The strategy owns the input so it can drop it as soon as it is no
-    /// longer needed: a remote strategy drops it once the proof is submitted,
-    /// so polling does not keep the task's witness in memory.
+    /// longer needed: a remote strategy drops it once the proof is submitted
+    /// and its ID saved, so polling does not keep the task's witness in
+    /// memory.
     fn prove(
         &self,
         input: <H::Program as ZkVmProgram>::Input,

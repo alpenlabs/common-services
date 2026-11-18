@@ -240,8 +240,10 @@ where
         ctx: &mut ProveContext,
     ) -> ProverResult<ProofReceiptWithMetadata> {
         let proof_id = self.submit_proof::<H>(&input, host).await?;
-        drop(input);
+        // The input is released only once the proof is submitted and its ID
+        // has been handed to the store, then the capacity it was using.
         ctx.persist(proof_id.clone().into());
+        drop(input);
         ctx.release_submission_permit();
         self.poll_until_done::<H>(host, &proof_id, self.poll_interval)
             .await
