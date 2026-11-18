@@ -65,8 +65,10 @@ where
 /// "Service was not ready: transport error". The shared runtime keeps the worker
 /// alive for as long as the strategy exists (i.e. the process).
 ///
-/// On crash recovery, if `ctx.saved` contains a serialized `ProofId`, we skip
-/// `start_proving` and resume polling directly — no double submission.
+/// On crash recovery, a saved `ProofId` is finished through [`ProveStrategy::resume`],
+/// which polls it without the task's input, so a submitted proof is never
+/// submitted twice. `prove` only ever sees saved metadata that
+/// [`ProveStrategy::can_resume`] rejected, and starts afresh.
 #[cfg(feature = "remote")]
 pub(crate) struct RemoteStrategy<Host> {
     host: Arc<Host>,
@@ -167,7 +169,6 @@ where
         mut ctx: ProveContext,
     ) -> ProverResult<ProofReceiptWithMetadata> {
         let host = self.host.clone();
-        let poll_interval = self.poll_interval;
 
         // Drive on the strategy's long-lived runtime (see the type-level docs):
         // a fresh per-call runtime would kill SP1's process-cached gRPC channel
@@ -178,31 +179,35 @@ where
             .as_ref()
             .expect("remote-prover runtime present outside Drop");
         rt.block_on(async move {
-            // Try to resume from saved metadata (prior crash).
-            let proof_id = if let Some(saved) = ctx.saved.take() {
-                match Host::ProofId::try_from(saved) {
-                    Ok(id) => {
-                        tracing::info!(%id, "resuming remote proof from saved metadata");
-                        ctx.release_submission_permit();
-                        id
-                    }
-                    Err(_) => {
-                        tracing::warn!("failed to deserialize saved ProofId, starting fresh");
-                        return self.start_fresh::<H>(input, &host, &mut ctx).await;
-                    }
-                }
-            } else {
-                // Fresh submission.
-                let id = self.submit_proof::<H>(input, &host).await?;
-                ctx.persist(id.clone().into());
-                ctx.release_submission_permit();
-                id
-            };
-
-            // Poll until completion.
-            self.poll_until_done::<H>(&host, &proof_id, poll_interval)
-                .await
+            // A resumable saved ID never reaches `prove`; the prover hands it to
+            // `resume`. Anything saved here is metadata `can_resume` rejected.
+            if ctx.saved.take().is_some() {
+                tracing::warn!("saved ProofId is not resumable, starting fresh");
+            }
+            self.start_fresh::<H>(input, &host, &mut ctx).await
         })
+    }
+
+    fn can_resume(&self, saved: &[u8]) -> bool {
+        Host::ProofId::try_from(saved.to_vec()).is_ok()
+    }
+
+    fn resume(&self, ctx: ProveContext) -> ProverResult<ProofReceiptWithMetadata> {
+        let Some(proof_id) = ctx
+            .saved
+            .and_then(|saved| Host::ProofId::try_from(saved).ok())
+        else {
+            // The caller checked the metadata first; a mismatch means the saved
+            // request is unusable, so the next attempt submits afresh.
+            return Err(ProverError::resubmit("saved proof ID is not resumable"));
+        };
+        tracing::info!(%proof_id, "resuming remote proof without preparing input");
+        let host = self.host.clone();
+        let rt = self
+            .rt
+            .as_ref()
+            .expect("remote-prover runtime present outside Drop");
+        rt.block_on(self.poll_until_done::<H>(&host, &proof_id, self.poll_interval))
     }
 }
 

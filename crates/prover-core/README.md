@@ -16,9 +16,10 @@ input and submit proofs at once:
   nothing waits in memory.
 - Native proving holds its unit until the blocking proof returns.
 - Remote proving releases its unit once it has tried to save the new proof ID
-  (a failed save is logged and leaves the task to resubmit after a restart), or
-  once a saved ID is accepted, before polling. The budget does not limit how
-  many remote proofs run at once.
+  (a failed save is logged and leaves the task to resubmit after a restart),
+  before polling. A task that resumes a saved proof ID skips input preparation
+  and releases its unit at once. The budget does not limit how many remote
+  proofs run at once.
 - Receipt storage and receipt hooks run without capacity.
 - `Blocked` rechecks use capacity only while they resolve input.
 
