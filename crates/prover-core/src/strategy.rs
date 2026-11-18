@@ -42,10 +42,10 @@ where
 {
     fn prove(
         &self,
-        input: &<H::Program as ZkVmProgram>::Input,
+        input: <H::Program as ZkVmProgram>::Input,
         _ctx: ProveContext,
     ) -> ProverResult<ProofReceiptWithMetadata> {
-        H::Program::prove(input, self.host.as_ref()).map_err(ProverError::from_zkvm)
+        H::Program::prove(&input, self.host.as_ref()).map_err(ProverError::from_zkvm)
     }
 }
 
@@ -165,7 +165,7 @@ where
 {
     fn prove(
         &self,
-        input: &<H::Program as ZkVmProgram>::Input,
+        input: <H::Program as ZkVmProgram>::Input,
         mut ctx: ProveContext,
     ) -> ProverResult<ProofReceiptWithMetadata> {
         let host = self.host.clone();
@@ -235,12 +235,15 @@ where
 
     async fn start_fresh<H: ProofSpec>(
         &self,
-        input: &<H::Program as ZkVmProgram>::Input,
+        input: <H::Program as ZkVmProgram>::Input,
         host: &Host,
         ctx: &mut ProveContext,
     ) -> ProverResult<ProofReceiptWithMetadata> {
-        let proof_id = self.submit_proof::<H>(input, host).await?;
+        let proof_id = self.submit_proof::<H>(&input, host).await?;
+        // The input is released only once the proof is submitted and its ID
+        // has been handed to the store, then the capacity it was using.
         ctx.persist(proof_id.clone().into());
+        drop(input);
         ctx.release_submission_permit();
         self.poll_until_done::<H>(host, &proof_id, self.poll_interval)
             .await

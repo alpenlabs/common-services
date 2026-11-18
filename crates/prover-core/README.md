@@ -19,7 +19,8 @@ input and submit proofs at once:
   (a failed save is logged and leaves the task to resubmit after a restart),
   before polling. A task that resumes a saved proof ID skips input preparation
   and releases its unit at once. The budget does not limit how many remote
-  proofs run at once.
+  proofs run at once, but a polling proof keeps no input in memory: the task
+  drops it once the proof is submitted and its ID saved.
 - Receipt storage and receipt hooks run without capacity.
 - `Blocked` rechecks use capacity only while they resolve input.
 
