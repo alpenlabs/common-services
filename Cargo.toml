@@ -26,12 +26,12 @@ parking_lot = "0.12.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11.15"
 strata-prover-core = { path = "crates/prover-core" }
-strata-service = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
+strata-service = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.6.0" }
 thiserror = "2.0.11"
 tokio = { version = "1.52", features = ["full"] }
 tracing = "0.1"
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [
   "arbitrary",
   "ssz",
-], tag = "v0.4.0" }
-zkaleido-native-adapter = { git = "https://github.com/alpenlabs/zkaleido", tag = "v0.4.0" }
+], tag = "v0.6.0" }
+zkaleido-native-adapter = { git = "https://github.com/alpenlabs/zkaleido", tag = "v0.6.0" }
